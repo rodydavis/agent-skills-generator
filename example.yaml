@@ -1,0 +1,18 @@
+output: .agent/skills
+flat: true
+file_rename: SKILL.md
+patterns:
+  - "https://docs.flutter.dev/*"
+  - "!https://docs.flutter.dev/release/breaking-changes/*"
+  - "!https://docs.flutter.dev/release/release-notes/*"
+  - "https://dart.dev/*"
+  - "!https://github.com/*"
+  - "!https://storage.googleapis.com/*"
+  - "!https://codelabs.developers.google.com/*"
+  - "!https://dart.dev/tools/diagnostics/*"
+  - "!https://docs.flutter.dev/tools/devtools/release-notes/*"
+  - "!https://dart.dev/tools/linter-rules/*"
+  # - "https://dartsignals.dev/*"
+  - "https://firebase.google.com/docs/app-hosting/*"
+  - "https://firebase.google.com/docs/hosting/*"
+  
