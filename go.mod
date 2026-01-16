@@ -1,4 +1,4 @@
-module github.com/rodydavis/quantum-star
+module github.com/rodydavis/agent-skills-generator
 
 go 1.25.1
 

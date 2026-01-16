@@ -1,3 +1,17 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package cmd
 
 import (
@@ -9,6 +23,8 @@ import (
 	"regexp"
 	"strings"
 
+	"net/url"
+
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/gobwas/glob"
@@ -17,6 +33,10 @@ import (
 	"github.com/spf13/viper"
 )
 
+// configFile holds the path to the configuration file.
+// outputDir holds the path to the output directory.
+// flatOutput indicates whether to use a flat directory structure.
+// fileRename holds the optional filename to rename the output file to.
 var (
 	configFile string
 	outputDir  string
@@ -24,6 +44,7 @@ var (
 	fileRename string
 )
 
+// crawlCmd represents the crawl command.
 var crawlCmd = &cobra.Command{
 	Use:   "crawl",
 	Short: "Crawl URLs based on context file",
@@ -35,44 +56,23 @@ var crawlCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(crawlCmd)
-	crawlCmd.Flags().StringVar(&configFile, "config", ".skillscontext", "config file path")
-	crawlCmd.Flags().StringVar(&outputDir, "output", ".skillscache", "output directory")
-	crawlCmd.Flags().BoolVar(&flatOutput, "flat", false, "save files in a flat directory structure")
-	crawlCmd.Flags().StringVar(&fileRename, "rename", "", "rename output markdown file (e.g. SKILL.md)")
-
-	viper.BindPFlag("config", crawlCmd.Flags().Lookup("config"))
-	viper.BindPFlag("output", crawlCmd.Flags().Lookup("output"))
-	viper.BindPFlag("flat", crawlCmd.Flags().Lookup("flat"))
-	viper.BindPFlag("file_rename", crawlCmd.Flags().Lookup("rename"))
+	// Flags are now on rootCmd
 }
 
-// runCrawl wraps the execution logic to use viper values if flags aren't explicitly set
+// runCrawl executes the crawler logic.
+// It loads the configuration, sets up the collector, and starts the crawl.
 func runCrawl(cmd *cobra.Command) {
-	// Load configuration into struct
 	var cfg Config
 	if err := viper.Unmarshal(&cfg); err != nil {
 		fmt.Printf("Error unmarshalling config: %v\n", err)
 		return
 	}
 
-	// Manual flag overrides (since unmarshal might not catch them if not bound??
-	// Viper BindPFlags should handle this, but let's be safe and explicit about precedence if needed.
-	// Actually, viper.Unmarshal uses the values from the bound flags if they have precedence.
-
-	// Ensure we respect the manual string var bindings if they were set?
-	// The manual variables (configFile, outputDir) are pointers bound to flags.
-	// If the flag was set, `configFile` has the value.
-	// If we use `viper.GetString("config")`, it also respects the flag if bound.
-	// We bound valid keys "config", "output", "flat" to flags in init().
-	// So `cfg` should be correct.
-
-	// Update package-level vars (used in saveResponse)
 	outputDir = cfg.Output
 	flatOutput = cfg.Flat
 	configFile = cfg.ConfigFile
 	fileRename = cfg.FileRename
 
-	// 1. Parse config (merged from file and inline)
 	allowedGlobs, ignoredGlobs, err := loadRules(&cfg)
 	if err != nil {
 		fmt.Printf("Error processing rules: %v\n", err)
@@ -81,18 +81,51 @@ func runCrawl(cmd *cobra.Command) {
 
 	fmt.Printf("Loaded %d allowed patterns and %d ignored patterns\n", len(allowedGlobs), len(ignoredGlobs))
 
-	// 2. Setup Colly
 	c := colly.NewCollector(
 		colly.Async(true),
 	)
 
-	// Limit parallelism
 	c.Limit(&colly.LimitRule{
 		DomainGlob:  "*",
 		Parallelism: 4,
 	})
 
-	// 3. Handlers
+	c.OnRequest(func(r *colly.Request) {
+		_, fullPath := getOutputPath(r.URL, outputDir, flatOutput, fileRename)
+
+		var mdPath string
+		if fileRename != "" {
+			mdPath = filepath.Join(filepath.Dir(fullPath), fileRename)
+		} else {
+			if strings.HasSuffix(fullPath, ".html") {
+				mdPath = strings.TrimSuffix(fullPath, ".html") + ".md"
+			} else {
+				mdPath = fullPath + ".md"
+			}
+		}
+
+		if info, err := os.Stat(mdPath); err == nil && !info.IsDir() {
+			f, err := os.Open(mdPath)
+			if err == nil {
+				defer f.Close()
+				scanner := bufio.NewScanner(f)
+				for scanner.Scan() {
+					line := scanner.Text()
+					if strings.Contains(line, "last_modified:") {
+						parts := strings.SplitN(line, ":", 2)
+						if len(parts) == 2 {
+							dateStr := strings.TrimSpace(parts[1])
+							if dateStr != "" {
+								r.Headers.Set("If-Modified-Since", dateStr)
+							}
+						}
+						break
+					}
+				}
+			}
+		}
+	})
+
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		link := e.Attr("href")
 		absLink := e.Request.AbsoluteURL(link)
@@ -100,16 +133,19 @@ func runCrawl(cmd *cobra.Command) {
 			return
 		}
 
-		// Check if we should visit
 		if shouldVisit(absLink, allowedGlobs, ignoredGlobs) {
 			e.Request.Visit(absLink)
 		}
 	})
 
 	c.OnResponse(func(r *colly.Response) {
+		if r.StatusCode == 304 {
+			fmt.Printf("Skipping %s (Not Modified)\n", r.Request.URL)
+			return
+		}
+
 		fmt.Printf("Visited: %s\n", r.Request.URL)
 
-		// Enforce rules on final URL (handles redirects)
 		if !shouldVisit(r.Request.URL.String(), allowedGlobs, ignoredGlobs) {
 			fmt.Printf("Skipping (not allowed/ignored): %s\n", r.Request.URL)
 			return
@@ -122,22 +158,7 @@ func runCrawl(cmd *cobra.Command) {
 		fmt.Printf("Error visiting %s: %v\n", r.Request.URL, err)
 	})
 
-	// 4. Start seeding
-	// We need to find initial URLs to start with.
-	// For simplicity, we can try to extract a base URL from the first allowed glob
-	// or just accept an argument.
-	// But the requirement says "crawl all urls... matching the rules".
-	// Typically we need at least one entry point.
-	// Let's assume the user wants to start from the base of the allowed globs that are not wildcards if possible,
-	// or we can just expect them to provide a starting URL, BUT the prompt implies
-	// it should just work from the config.
-	// A common pattern like `https://docs.flutter.dev/*` implies we might want to start at `https://docs.flutter.dev/`.
-
-	// Let's derive seed URLs from allowed patterns (stripping wildcards)
 	for _, g := range allowedGlobs {
-		// This is a heuristic.
-		// If we have `https://domain.com/*`, we visit `https://domain.com/`
-		// We can't really "visit" a glob, so we have to guess the entry point.
 		seed := getSeedURL(g.pattern)
 		if seed != "" {
 			fmt.Printf("Seeding: %s\n", seed)
@@ -148,6 +169,7 @@ func runCrawl(cmd *cobra.Command) {
 	c.Wait()
 }
 
+// globRule represents a compiled glob pattern.
 type globRule struct {
 	pattern string
 	g       glob.Glob
@@ -158,7 +180,6 @@ func loadRules(cfg *Config) ([]globRule, []globRule, error) {
 	var allowed []globRule
 	var ignored []globRule
 
-	// Helper to process a pattern string
 	processPattern := func(pattern string) {
 		pattern = strings.TrimSpace(pattern)
 		if pattern == "" || strings.HasPrefix(pattern, "#") {
@@ -185,7 +206,6 @@ func loadRules(cfg *Config) ([]globRule, []globRule, error) {
 		}
 	}
 
-	// 1. Load from external config file if it exists
 	if cfg.ConfigFile != "" {
 		f, err := os.Open(cfg.ConfigFile)
 		if err == nil {
@@ -198,18 +218,14 @@ func loadRules(cfg *Config) ([]globRule, []globRule, error) {
 				fmt.Printf("Warning reading config file: %v\n", err)
 			}
 		} else if !os.IsNotExist(err) {
-			// Only report if it's an error other than "not found"
-			// (since default is .skillscontext which might not exist)
 			fmt.Printf("Warning opening config file: %v\n", err)
 		}
 	}
 
-	// 2. Load inline patterns
 	for _, p := range cfg.Patterns {
 		processPattern(p)
 	}
 
-	// 3. Load verbose rules
 	for _, r := range cfg.Rules {
 		pat := r.URL
 		if r.Subpaths {
@@ -230,23 +246,19 @@ func loadRules(cfg *Config) ([]globRule, []globRule, error) {
 	return allowed, ignored, nil
 }
 
+// shouldVisit checks if a link should be visited based on allowed and ignored rules.
 func shouldVisit(link string, allowed, ignored []globRule) bool {
-	// First check ignores
 	for _, rule := range ignored {
 		if rule.g.Match(link) {
 			return false
 		}
 	}
 
-	// Then check allowed
 	for _, rule := range allowed {
 		if rule.g.Match(link) {
 			return true
 		}
 	}
-	return false
-}
-
 	return false
 }
 
@@ -299,24 +311,18 @@ func getOutputPath(u *url.URL, outDir string, flat bool, rename string) (string,
 		// Hierarchical structure: .skillscache/<hostname>/<path>
 		fullPath = filepath.Join(outDir, u.Hostname(), path)
 	}
-	
+
 	dir := filepath.Dir(fullPath)
 	return dir, fullPath
 }
 
+// saveResponse saves the response body to a file and converts it to markdown.
 func saveResponse(r *colly.Response, outDir string) {
-	// Only save HTML content
 	contentType := r.Headers.Get("Content-Type")
-	if contentType == "" {
-		// Fallback: check body or assume html if unknown?
-		// For strictness, let's require text/html or application/xhtml+xml
-		// But often it might include charset e.g. "text/html; charset=utf-8"
-	}
 	if !strings.Contains(strings.ToLower(contentType), "text/html") {
 		return
 	}
 
-	// Calculate paths
 	dirName, fullPath := getOutputPath(r.Request.URL, outDir, flatOutput, fileRename)
 
 	if err := os.MkdirAll(dirName, 0755); err != nil {
@@ -324,16 +330,13 @@ func saveResponse(r *colly.Response, outDir string) {
 		return
 	}
 
-	// Save HTML
 	if err := os.WriteFile(fullPath, r.Body, 0644); err != nil {
 		fmt.Printf("Error writing html file %s: %v\n", fullPath, err)
 	}
 
-	// Extract Metadata
 	title, description, err := extractMetadata(r.Body)
 	if err != nil {
 		fmt.Printf("Error extracting metadata for %s: %v\n", fullPath, err)
-		// Proceed without metadata or with minimal defaults if needed
 	}
 	if title == "" {
 		title = "Untitled"
@@ -342,14 +345,12 @@ func saveResponse(r *colly.Response, outDir string) {
 		description = "No description available."
 	}
 
-	// Extract Content for Markdown
 	cleanHTML, err := extractContent(r.Body)
 	if err != nil {
 		fmt.Printf("Error extracting content for %s: %v\n", fullPath, err)
 		return
 	}
 
-	// Convert to Markdown
 	converter := md.NewConverter("", true, nil)
 	markdownBody, err := converter.ConvertString(cleanHTML)
 	if err != nil {
@@ -357,16 +358,13 @@ func saveResponse(r *colly.Response, outDir string) {
 		return
 	}
 
-	// Prepare Frontmatter
-	// Name should match folder name (if flat mode, we use the dir name we just calculated)
 	var name string
 	if flatOutput {
-		// dirName returned by getOutputPath is the full path, we need just the last segment
 		name = filepath.Base(dirName)
 	} else {
 		name = toPathCase(title)
 	}
-	
+
 	metaUrl := r.Request.URL.String()
 	lastModified := r.Headers.Get("Last-Modified")
 	if lastModified == "" {
@@ -376,16 +374,10 @@ func saveResponse(r *colly.Response, outDir string) {
 
 	finalMarkdown := frontmatter + markdownBody
 
-	// Save Markdown
-	// Replace extension with .md (or append if it was index.html)
-	// Actually we know fullPath ends in something.
-	// If it ends in .html, replace it.
 	var mdPath string
 	if fileRename != "" {
-		// If renaming, we use the directory of the HTML file and the new name
 		mdPath = filepath.Join(filepath.Dir(fullPath), fileRename)
 	} else {
-		// Default behavior: same name as HTML but with .md extension
 		if strings.HasSuffix(fullPath, ".html") {
 			mdPath = strings.TrimSuffix(fullPath, ".html") + ".md"
 		} else {
@@ -398,6 +390,7 @@ func saveResponse(r *colly.Response, outDir string) {
 	}
 }
 
+// extractMetadata extracts the title and description from the HTML body.
 func extractMetadata(body []byte) (string, string, error) {
 	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 	if err != nil {
@@ -417,41 +410,36 @@ func extractMetadata(body []byte) (string, string, error) {
 	return strings.TrimSpace(title), strings.TrimSpace(description), nil
 }
 
+// extractContent extracts the main content from the HTML body.
 func extractContent(body []byte) (string, error) {
 	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
 
-	// Default to body
 	selection := doc.Find("body")
 
-	// Prefer article
 	article := doc.Find("article")
 	if article.Length() > 0 {
 		selection = article
 	}
 
-	// Remove unwanted elements
-	// Header with breadcrumbs and title (we add title manually in frontmatter)
 	selection.Find("header#site-content-title").Remove()
-	// Table of contents if present (often extraneous in markdown conversion if just a list of links)
 	selection.Find(".toc").Remove()
 
 	return selection.Html()
 }
 
+// toPathCase converts a string to path case (kebab-case).
 func toPathCase(s string) string {
 	s = strings.ToLower(s)
-	// Replace non-alphanumeric with -
 	re := regexp.MustCompile(`[^a-z0-9]+`)
 	s = re.ReplaceAllString(s, "-")
 	return strings.Trim(s, "-")
 }
 
+// getSeedURL returns the seed URL from a glob pattern.
 func getSeedURL(pattern string) string {
-	// Simple heuristic: take everything before the first wildcard
-	// e.g. https://docs.flutter.dev/* -> https://docs.flutter.dev/
 	idx := strings.Index(pattern, "*")
 	if idx != -1 {
 		return pattern[:idx]

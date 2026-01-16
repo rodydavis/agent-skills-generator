@@ -1,16 +1,38 @@
-# Quantum Star
+# Agent Skills Generator
 
-A new Golang CLI project.
+A CLI tool to crawl documentation websites and convert them into Markdown files optimized for agentic skills (LLM context).
 
-## CLI Usage
+## Features
 
-Run the crawler using the `crawl` command:
+*   **Recursive Crawling**: Crawls a website based on allowed and ignored glob patterns.
+*   **HTML to Markdown**: Converts HTML content to clean Markdown, removing navigation and extraneous elements.
+*   **Flat Storage**: Option to save files in a flat directory structure (`domain_path_to_file/index.md`) for easier RAG ingestion.
+*   **Metadata Extraction**: Extracts title, description, URL, and Last-Modified date into frontmatter.
+*   **Incremental Crawling**: Checks `Last-Modified` headers to avoid re-downloading unchanged content.
+*   **Configurable**: Supports YAML configuration for rules, output directory, and renaming.
+*   **Filtering**: Strict domain and path filtering using glob patterns.
+
+## Installation
 
 ```bash
-go run main.go crawl [flags]
+git clone https://github.com/rodydavis/agent-skills-generator.git
+cd agent-skills-generator
+go build -o agent-skills-generator main.go
 ```
 
-### Flags
+## Usage
+
+```bash
+./agent-skills-generator [command] [flags]
+### Crawl
+
+Crawl a website using a configuration file (default `.skillscontext`).
+
+```bash
+./agent-skills-generator crawl --config .skillscontext
+```
+
+#### Flags
 
 | Flag | Description | Default |
 | :--- | :--- | :--- |
@@ -18,9 +40,17 @@ go run main.go crawl [flags]
 | `--output` | Directory to save crawled content | `.skillscache` |
 | `--flat` | Use flat directory structure (recommended for easy consumption) | `false` |
 
+### Clean
+
+Remove the output directory (default `.skillscache`).
+
+```bash
+./agent-skills-generator clean
+```
+
 ### Configuration (`.skillscontext`)
 
-Create a `.skillscontext` file with a list of URL patterns to include or exclude. 
+Create a `.skillscontext` file with a list of URL patterns to include or exclude.
 - Use `*` as a wildcard.
 - Prefix with `!` to exclude patterns.
 
@@ -69,9 +99,11 @@ go run main.go clean --output my-cache
 
 ### Configuration File (`skills.yaml`)
 
-You can create a `skills.yaml` file in the current directory to set default values for flags.
+You can also use a `skills.yaml` file to define command arguments and rules (both verbose and inline).
 
-**Example `skills.yaml`:**
+```bash
+./agent-skills-generator crawl --config skills.yaml
+```:**
 
 ```yaml
 output: .skillscache
@@ -98,3 +130,27 @@ rules:
 file_rename: "SKILL.md"
 ```
 Arguments passed via CLI flags will take precedence over values in `skills.yaml`.
+
+## Example
+
+Flutter, Dart, Firebase and signals docs added as agent skills in Antigravity:
+
+```yaml
+output: .agent/skills
+flat: true
+file_rename: SKILL.md
+patterns:
+  - "https://docs.flutter.dev/*"
+  - "!https://docs.flutter.dev/release/breaking-changes/*"
+  - "!https://docs.flutter.dev/release/release-notes/*"
+  - "https://dart.dev/*"
+  - "!https://github.com/*"
+  - "!https://storage.googleapis.com/*"
+  - "!https://codelabs.developers.google.com/*"
+  - "!https://dart.dev/tools/diagnostics/*"
+  - "!https://docs.flutter.dev/tools/devtools/release-notes/*"
+  - "!https://dart.dev/tools/linter-rules/*"
+  - "https://dartsignals.dev/*"
+  - "https://firebase.google.com/docs/app-hosting/*"
+  - "https://firebase.google.com/docs/hosting/*"
+```
