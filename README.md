@@ -144,8 +144,6 @@ patterns:
   - "!https://docs.flutter.dev/release/breaking-changes/*"
   - "!https://docs.flutter.dev/release/release-notes/*"
   - "https://dart.dev/*"
-  - "!https://github.com/*"
-  - "!https://storage.googleapis.com/*"
   - "!https://codelabs.developers.google.com/*"
   - "!https://dart.dev/tools/diagnostics/*"
   - "!https://docs.flutter.dev/tools/devtools/release-notes/*"
