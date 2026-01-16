@@ -364,12 +364,16 @@ func saveResponse(r *colly.Response, outDir string) {
 	} else {
 		name = toPathCase(title)
 	}
+	name = sanitizeName(name)
 
 	metaUrl := r.Request.URL.String()
 	lastModified := r.Headers.Get("Last-Modified")
 	if lastModified == "" {
 		lastModified = r.Headers.Get("Date")
 	}
+
+	description = sanitizeDescription(description)
+
 	frontmatter := fmt.Sprintf("---\nname: %s\ndescription: %s\nmetadata:\n  url: %s\n  last_modified: %s\n---\n\n# %s\n\n", name, description, metaUrl, lastModified, title)
 
 	finalMarkdown := frontmatter + markdownBody
@@ -433,9 +437,45 @@ func extractContent(body []byte) (string, error) {
 // toPathCase converts a string to path case (kebab-case).
 func toPathCase(s string) string {
 	s = strings.ToLower(s)
+	// Replace non-alphanumeric with -
 	re := regexp.MustCompile(`[^a-z0-9]+`)
 	s = re.ReplaceAllString(s, "-")
 	return strings.Trim(s, "-")
+}
+
+func sanitizeName(s string) string {
+	// Lowercase, numbers, hyphens only
+	s = strings.ToLower(s)
+	re := regexp.MustCompile(`[^a-z0-9-]+`)
+	s = re.ReplaceAllString(s, "-")
+
+	// No start or end hyphen
+	s = strings.Trim(s, "-")
+
+	// Max 64 chars
+	if len(s) > 64 {
+		s = s[:64]
+		// Ensure we didn't slice in middle of valid char (ASCII is fine)
+		// but removing trailing hyphen again is good practice
+		s = strings.TrimRight(s, "-")
+	}
+
+	if s == "" {
+		s = "untitled"
+	}
+
+	return s
+}
+
+func sanitizeDescription(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "No description available."
+	}
+	if len(s) > 1024 {
+		s = s[:1024] + "..."
+	}
+	return s
 }
 
 // getSeedURL returns the seed URL from a glob pattern.
