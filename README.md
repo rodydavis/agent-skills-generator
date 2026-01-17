@@ -24,6 +24,8 @@ go build -o agent-skills-generator main.go
 
 ```bash
 ./agent-skills-generator [command] [flags]
+```
+
 ### Crawl
 
 Crawl a website using a configuration file (default `.skillscontext`).
