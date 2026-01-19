@@ -105,7 +105,7 @@ You can also use a `skills.yaml` file to define command arguments and rules (bot
 
 ```bash
 ./agent-skills-generator crawl --config skills.yaml
-```:**
+```
 
 ```yaml
 output: .skillscache
