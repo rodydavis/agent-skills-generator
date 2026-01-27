@@ -1,156 +1,75 @@
 # Agent Skills Generator
 
-A CLI tool to crawl documentation websites and convert them into Markdown files optimized for agentic skills (LLM context).
+Convert documentation websites into Markdown skills optimized for AI agents and LLMs.
 
-## Features
+This repository contains two projects:
+1. **VS Code Extension**: A GUI-based tool to manage and generate skills directly within VS Code.
+2. **Go CLI**: A robust command-line tool for high-performance crawling and generation.
 
-*   **Recursive Crawling**: Crawls a website based on allowed and ignored glob patterns.
-*   **HTML to Markdown**: Converts HTML content to clean Markdown, removing navigation and extraneous elements.
-*   **Flat Storage**: Option to save files in a flat directory structure (`domain_path_to_file/index.md`) for easier RAG ingestion.
-*   **Metadata Extraction**: Extracts title, description, URL, and Last-Modified date into frontmatter.
-*   **Incremental Crawling**: Checks `Last-Modified` headers to avoid re-downloading unchanged content.
-*   **Configurable**: Supports YAML configuration for rules, output directory, and renaming.
-*   **Filtering**: Strict domain and path filtering using glob patterns.
+---
 
-## Installation
+## 1. VS Code Extension
+
+Code located in [`vscode-extension/`](./vscode-extension).
+
+A Visual Studio Code extension that provides a dedicated "Agent Skills" side panel to manage your crawling rules and generate skills.
+
+### Features
+*   **Visual Rule Management**: Add, edit, and delete URL patterns via a clean UI.
+*   **One-Click Generation**: Fetch skills directly from VS Code.
+*   **State Persistence**: Rules and settings are saved between sessions.
+*   **Import/Export**: Share configurations via JSON files.
+*   **Configurable**: Set output directory, file naming, and structure preferences.
+
+### Installation
+
+1. Clone this repository.
+2. Open the `vscode-extension` folder in VS Code.
+3. Run `npm install` to install dependencies.
+4. Press `F5` to start the extension in a debug window.
+
+### Usage
+1. Open the **Agent Skills** view in the Activity Bar.
+2. Add URL patterns (e.g., `https://docs.flutter.dev/`).
+3. Configure **Include/Ignore** and **Subpaths**.
+4. Click **Fetch Skills**.
+
+---
+
+## 2. Go CLI
+
+Code located in [`go-cli/`](./go-cli).
+
+A high-performance CLI tool written in Go for recursive crawling and Markdown conversion.
+
+### Features
+*   **Recursive Crawling**: Configurable depth and filtering.
+*   **HTML to Markdown**: Clean conversion optimized for token efficiency.
+*   **Metadata Extraction**: Frontmatter with original URL, title, and dates.
+*   **Flat Storage**: Option to save as flat structures for RAG compatability.
+
+### Installation
 
 ```bash
-git clone https://github.com/rodydavis/agent-skills-generator.git
-cd agent-skills-generator
+cd go-cli
 go build -o agent-skills-generator main.go
 ```
 
-## Usage
-
-```bash
-./agent-skills-generator [command] [flags]
-```
-
-### Crawl
-
-Crawl a website using a configuration file (default `.skillscontext`).
-
-```bash
-./agent-skills-generator crawl --config .skillscontext
-```
-
-#### Flags
-
-| Flag | Description | Default |
-| :--- | :--- | :--- |
-| `--config` | Path to the configuration file | `.skillscontext` |
-| `--output` | Directory to save crawled content | `.skillscache` |
-| `--flat` | Use flat directory structure (recommended for easy consumption) | `false` |
-
-### Clean
-
-Remove the output directory (default `.skillscache`).
-
-```bash
-./agent-skills-generator clean
-```
-
-### Configuration (`.skillscontext`)
-
-Create a `.skillscontext` file with a list of URL patterns to include or exclude.
-- Use `*` as a wildcard.
-- Prefix with `!` to exclude patterns.
-
-**Example:**
-
-```
-# Include all pages under docs.flutter.dev
-https://docs.flutter.dev/*
-
-# Exclude specific sub-paths
-!https://docs.flutter.dev/release/breaking-changes/*
-
-# Include a single specific page
-https://dart.dev/guides/language/effective-dart/style
-```
-
-### Examples
+### Usage
 
 **Basic Crawl:**
-```bash
-go run main.go crawl
-```
-
-**Flat Output (Folder-per-Page):**
-```bash
-go run main.go crawl --flat
-```
-This will create a directory for each page (e.g., `docs_flutter_dev_install`) containing `index.html` and `index.md`.
-
-**Custom Config and Output:**
-```bash
-go run main.go crawl --config my-urls.txt --output my-cache
-```
-
-### Clean Command
-
-Use the `clean` command to remove the output directory before a fresh crawl.
-
-```bash
-# Clean the default .skillscache directory
-go run main.go clean
-
-# Clean a custom output directory
-go run main.go clean --output my-cache
-```
-
-### Configuration File (`skills.yaml`)
-
-You can also use a `skills.yaml` file to define command arguments and rules (both verbose and inline).
-
 ```bash
 ./agent-skills-generator crawl --config skills.yaml
 ```
 
-```yaml
-output: .skillscache
-flat: true
-config: .skillscontext # Optional external file
-
-# Inline patterns (list of strings)
-patterns:
-  - "https://docs.flutter.dev/*"
-  - "!https://docs.flutter.dev/release/*"
-
-# Verbose rules (list of objects)
-rules:
-  # Visit all pages under this path (implicitly adds /*)
-  - url: "https://dart.dev/language/collections"
-    subpaths: true
-    action: "include"
-
-  # Ignore this specific page
-  - url: "https://dart.dev/language/collections/iterables"
-    action: "ignore"
-
-# Optional: Rename output Markdown files
-file_rename: "SKILL.md"
-```
-Arguments passed via CLI flags will take precedence over values in `skills.yaml`.
-
-## Example
-
-Flutter, Dart, Firebase and signals docs added as agent skills in Antigravity:
-
+**Configuration (`skills.yaml`):**
 ```yaml
 output: .agent/skills
 flat: true
-file_rename: SKILL.md
-patterns:
-  - "https://docs.flutter.dev/*"
-  - "!https://docs.flutter.dev/release/breaking-changes/*"
-  - "!https://docs.flutter.dev/release/release-notes/*"
-  - "https://dart.dev/*"
-  - "!https://codelabs.developers.google.com/*"
-  - "!https://dart.dev/tools/diagnostics/*"
-  - "!https://docs.flutter.dev/tools/devtools/release-notes/*"
-  - "!https://dart.dev/tools/linter-rules/*"
-  - "https://dartsignals.dev/*"
-  - "https://firebase.google.com/docs/app-hosting/*"
-  - "https://firebase.google.com/docs/hosting/*"
+rules:
+  - url: "https://docs.flutter.dev/"
+    subpaths: true
+    action: "include"
 ```
+
+For full CLI documentation, see [`go-cli/README.md`](./go-cli/README.md).

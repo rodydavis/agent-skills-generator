@@ -1,3 +1,4 @@
 .agent/skills/
 skills.yaml
 agent-skills-generator
+agent-skills.json

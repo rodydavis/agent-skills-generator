@@ -1,0 +1,176 @@
+body {
+    padding: 15px;
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size);
+    color: var(--vscode-foreground);
+    background-color: var(--vscode-editor-background);
+}
+
+.container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.section {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+h2,
+h3 {
+    margin: 0;
+    padding: 0;
+    font-weight: 500;
+}
+
+.header-actions,
+.footer-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.row {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+}
+
+.checkbox-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+input[type="text"],
+select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    background-color: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 2px;
+}
+
+input[type="text"]:focus,
+select:focus {
+    outline: none;
+    border-color: var(--vscode-focusBorder);
+}
+
+input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+}
+
+button {
+    padding: 6px 12px;
+    cursor: pointer;
+    border-radius: 2px;
+    border: none;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+}
+
+.primary-btn {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    width: 100%;
+    padding: 10px;
+    font-weight: 500;
+}
+
+.primary-btn:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+.secondary {
+    background-color: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+}
+
+.secondary:hover {
+    background-color: var(--vscode-button-secondaryHoverBackground);
+}
+
+.icon-btn {
+    background-color: transparent;
+    color: var(--vscode-foreground);
+    border: 1px solid var(--vscode-input-border);
+}
+
+.icon-btn:hover {
+    background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.small-btn {
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+.delete-btn {
+    background-color: transparent;
+    color: var(--vscode-errorForeground);
+    padding: 2px 6px;
+    opacity: 0.8;
+}
+
+.delete-btn:hover {
+    opacity: 1;
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+#rules-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.rule-item {
+    background-color: var(--vscode-keybindingTable-rowsBackground);
+    border: 1px solid var(--vscode-widget-border);
+    padding: 12px;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.rule-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    color: var(--vscode-descriptionForeground);
+    border-bottom: 1px solid var(--vscode-widget-border);
+    padding-bottom: 8px;
+    margin-bottom: -4px;
+}
+
+.empty-state {
+    text-align: center;
+    color: var(--vscode-descriptionForeground);
+    padding: 20px;
+    font-style: italic;
+}
