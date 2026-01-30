@@ -3,6 +3,7 @@ const vscode = acquireVsCodeApi();
 document.addEventListener('DOMContentLoaded', () => {
     const outputDirInput = document.getElementById('output-dir');
     const flatStructureInput = document.getElementById('flat-structure');
+    const crawlDependenciesInput = document.getElementById('crawl-dependencies');
     const fileRenameInput = document.getElementById('file-rename');
     const rulesList = document.getElementById('rules-list');
     const addRuleBtn = document.getElementById('add-rule-btn');
@@ -22,7 +23,11 @@ document.addEventListener('DOMContentLoaded', () => {
             ruleEl.innerHTML = `
                 <div class="rule-header">
                     <span>Rule #${index + 1}</span>
-                    <button class="delete-btn" data-index="${index}">🗑</button>
+                    <div class="rule-actions">
+                        <button class="icon-btn move-up-btn" data-index="${index}" title="Move Up" ${index === 0 ? 'disabled' : ''}>⬆️</button>
+                        <button class="icon-btn move-down-btn" data-index="${index}" title="Move Down" ${index === rules.length - 1 ? 'disabled' : ''}>⬇️</button>
+                        <button class="delete-btn" data-index="${index}" title="Delete">🗑</button>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>URL</label>
@@ -55,6 +60,28 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
+        document.querySelectorAll('.move-up-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const index = parseInt(e.target.dataset.index);
+                if (index > 0) {
+                    [rules[index - 1], rules[index]] = [rules[index], rules[index - 1]];
+                    renderRules();
+                    saveState();
+                }
+            });
+        });
+
+        document.querySelectorAll('.move-down-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const index = parseInt(e.target.dataset.index);
+                if (index < rules.length - 1) {
+                    [rules[index + 1], rules[index]] = [rules[index], rules[index + 1]];
+                    renderRules();
+                    saveState();
+                }
+            });
+        });
+
         document.querySelectorAll('.rule-url').forEach(input => {
             input.addEventListener('change', (e) => {
                 const index = parseInt(e.target.dataset.index);
@@ -84,6 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return {
             output: outputDirInput.value,
             flat: flatStructureInput.checked,
+            crawlDependencies: crawlDependenciesInput.checked,
             file_rename: fileRenameInput.value,
             rules: rules
         };
@@ -100,11 +128,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Input listeners for auto-save
     outputDirInput.addEventListener('change', saveState);
     flatStructureInput.addEventListener('change', saveState);
+    crawlDependenciesInput.addEventListener('change', saveState);
     fileRenameInput.addEventListener('change', saveState);
 
     // Add Rule
     addRuleBtn.addEventListener('click', () => {
-        rules.push({
+        rules.unshift({
             url: '',
             subpaths: true,
             action: 'include'
@@ -142,6 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (state) {
                     outputDirInput.value = state.output || '.agents/skills';
                     flatStructureInput.checked = state.flat !== undefined ? state.flat : true;
+                    if (crawlDependenciesInput) crawlDependenciesInput.checked = state.crawlDependencies || false;
                     fileRenameInput.value = state.file_rename || 'SKILL.md';
                     rules = state.rules || [];
 

@@ -139,6 +139,12 @@ button {
     background-color: var(--vscode-list-hoverBackground);
 }
 
+.rule-actions {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+}
+
 #rules-list {
     display: flex;
     flex-direction: column;

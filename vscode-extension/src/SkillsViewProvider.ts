@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { Crawler } from './crawler/Crawler';
+import { DependencyScanner } from './crawler/DependencyScanner';
 
 export class SkillsViewProvider implements vscode.WebviewViewProvider {
 
@@ -124,13 +125,27 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
                 console.log("User canceled the long running operation");
             });
 
-            const crawler = new Crawler(rootPath, config);
-
-            crawler.onProgress((msg: string) => {
-                progress.report({ message: msg });
-            });
-
             try {
+                const configForCrawler = { ...config, rules: [] as any[] };
+                if (config.rules) config.rules.forEach((r: any) => configForCrawler.rules.push(r));
+
+                // Auto-crawl dependencies
+                if (config.crawlDependencies) {
+                    try {
+                        const depRules = await DependencyScanner.scan(rootPath);
+                        progress.report({ message: `Discovered ${depRules.length} dependency rules...` });
+                        configForCrawler.rules.push(...depRules);
+                    } catch (e: any) {
+                        vscode.window.showWarningMessage(`Dependency scan failed: ${e.message}`);
+                    }
+                }
+
+                const crawler = new Crawler(rootPath, configForCrawler);
+
+                crawler.onProgress((msg: string) => {
+                    progress.report({ message: msg });
+                });
+
                 await crawler.crawl();
 
                 // Update state with lastFetched
@@ -181,6 +196,12 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
                  <div class="checkbox-container">
                     <input type="checkbox" id="flat-structure" checked />
                     <label for="flat-structure">Flat Structure</label>
+                 </div>
+              </div>
+               <div class="form-group row">
+                 <div class="checkbox-container">
+                    <input type="checkbox" id="crawl-dependencies" />
+                    <label for="crawl-dependencies">Crawl Dependencies (NPM/Pub/Go)</label>
                  </div>
               </div>
                <div class="form-group">

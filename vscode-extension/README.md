@@ -20,6 +20,15 @@ Tailor the generated files to your project structure:
 ### 🔄 Import / Export Configuration
 - Easily share your crawling configuration with your team or across projects using the built-in JSON import/export feature.
 
+### 📦 Dependency Auto-Crawling
+- Automatically crawl documentation for your project's direct-dependencies.
+- Supports `package.json` (NPM), `pubspec.yaml` (Pub), and `go.mod` (Go).
+- Generates version-specific URLs to ensure documentation matches your installed packages.
+
+### 🔍 Sitemap & RSS Discovery
+- Automatically discovers pages via `sitemap.xml`, `robots.txt`, and RSS/Atom feeds.
+- Smartly avoids re-scanning the same domain to be efficient.
+
 ## Usage
 
 1.  **Open the Generator**: Click on the **Agent Skills** icon in the Activity Bar.
@@ -48,6 +57,16 @@ No external dependencies are required to run this extension.
 - Complex interactions (like SPAs that require heavy JS execution) might have limited support depending on the crawler's capabilities.
 
 ## Release Notes
+
+### 0.0.3
+- Added Dependency Auto-Crawling (NPM, Pub, Go).
+- Added Sitemap and RSS/Atom feed discovery.
+- Improved crawling efficiency.
+
+### 0.0.2
+- Added incremental crawling support.
+- Fixed URL handling for paths without trailing slashes.
+- Added unit tests.
 
 ### 0.0.1
 - Initial release.

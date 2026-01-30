@@ -1,9 +1,10 @@
-import * as vscode from 'vscode';
+
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import TurndownService from 'turndown';
+import * as yaml from 'js-yaml';
 
 interface Config {
     output: string;
@@ -17,18 +18,34 @@ interface Rule {
     url: string;
     subpaths?: boolean;
     action: 'include' | 'ignore';
+    bundle?: boolean;
+}
+
+export interface FileSystemDependencies {
+    writeFileSync: (path: fs.PathLike | number, data: string | NodeJS.ArrayBufferView, options?: fs.WriteFileOptions) => void;
+    readFileSync: (path: fs.PathLike, options?: { encoding?: null; flag?: string; } | null) => Buffer | string;
+    mkdirSync: (path: fs.PathLike, options?: fs.MakeDirectoryOptions & { recursive: true; }) => string | undefined;
+    existsSync: (path: fs.PathLike) => boolean;
 }
 
 export class Crawler {
     private visited = new Set<string>();
+    private scannedDomains = new Set<string>();
     private config: Config;
     private rootPath: string;
     private turndownService: TurndownService;
+    private fs: FileSystemDependencies;
     private _onProgress?: (msg: string) => void;
 
-    constructor(rootPath: string, config: Config) {
+    constructor(rootPath: string, config: Config, fileSystem?: FileSystemDependencies) {
         this.rootPath = rootPath;
         this.config = config;
+        this.fs = fileSystem || {
+            writeFileSync: fs.writeFileSync,
+            readFileSync: fs.readFileSync,
+            mkdirSync: (path: fs.PathLike, options) => fs.mkdirSync(path, options),
+            existsSync: fs.existsSync
+        };
         this.turndownService = new TurndownService({
             headingStyle: 'atx',
             codeBlockStyle: 'fenced'
@@ -49,6 +66,7 @@ export class Crawler {
     public async crawl() {
         this.log('Starting crawl...');
         this.visited.clear();
+        this.scannedDomains.clear();
 
         // Process "include" rules
         for (const rule of this.config.rules) {
@@ -65,7 +83,7 @@ export class Crawler {
         urlObj.hash = '';
         const cleanUrl = urlObj.toString();
 
-        if (this.visited.has(cleanUrl)) return;
+        if (this.visited.has(cleanUrl)) { return; }
 
         // Basic check for ignore rules
         if (this.shouldIgnore(cleanUrl)) {
@@ -77,51 +95,119 @@ export class Crawler {
         this.log(`Visiting: ${cleanUrl}`);
 
         try {
-            const response = await axios.get(cleanUrl, {
-                headers: { 'User-Agent': 'AgentSkillsGenerator/1.0' }
-            });
+            const config: any = {};
+            const existingPath = this.getFilePath(cleanUrl, rule);
 
-            const contentType = response.headers['content-type'];
-            if (!contentType || !contentType.includes('text/html')) {
+            if (this.fs.existsSync(existingPath)) {
+                try {
+                    const content = this.fs.readFileSync(existingPath).toString();
+                    if (content.startsWith('---')) {
+                        const end = content.indexOf('---', 3);
+                        if (end > 3) {
+                            const fm = content.substring(3, end);
+                            const meta = yaml.load(fm) as any;
+                            const lastModified = meta?.metadata?.last_modified;
+                            if (lastModified) {
+                                config.headers = { 'If-Modified-Since': lastModified };
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // ignore read error
+                }
+            }
+
+            // Merge user agent
+            config.headers = { ...config.headers, 'User-Agent': 'AgentSkillsGenerator/1.0' };
+            // Allow 304 to be passed as a valid status, or catch it
+            config.validateStatus = (status: number) => (status >= 200 && status < 300) || status === 304;
+
+            const response = await axios.get(cleanUrl, config);
+
+            if (response.status === 304) {
+                this.log(`Not modified: ${cleanUrl}`);
                 return;
             }
 
-            const html = response.data;
-            await this.processPage(cleanUrl, html);
+            const contentType = response.headers['content-type'] || '';
+            const isXml = cleanUrl.endsWith('.xml') || contentType.includes('xml') || contentType.includes('rss');
+            const isHtml = contentType.includes('text/html');
 
-            // If subpaths are enabled, find links
-            if (rule.subpaths) {
-                const $ = cheerio.load(html);
-                const links: string[] = [];
-                $('a[href]').each((_, el) => {
-                    const href = $(el).attr('href');
-                    if (href) {
-                        try {
-                            const absUrlObj = new URL(href, cleanUrl);
-                            absUrlObj.hash = ''; // Strip hash from extracted links
-                            const absoluteUrl = absUrlObj.toString();
+            if (!isHtml && !isXml) {
+                return;
+            }
 
-                            // Basic scope check: must start with the rule URL (simple subpath logic)
-                            // Note: This is a simplified version of the Go gobwas/glob logic.
-                            // For strict parity we'd need a glob matcher or exact prefix check.
-                            // Here we enforce it must be under the rule base URL
-                            if (absoluteUrl.startsWith(rule.url)) {
-                                links.push(absoluteUrl);
+            const content = response.data;
+            const links: string[] = [];
+
+            if (isXml) {
+                this.log(`Parsing XML feed: ${cleanUrl}`);
+                const extraLinks = this.extractLinksFromXml(content);
+                links.push(...extraLinks);
+            } else {
+                // Process HTML
+                await this.processPage(cleanUrl, content, rule);
+
+                // If subpaths are enabled, find links in HTML
+                if (rule.subpaths) {
+                    const $ = cheerio.load(content);
+                    $('a[href]').each((_, el) => {
+                        const href = $(el).attr('href');
+                        if (href) {
+                            try {
+                                const absUrlObj = new URL(href, cleanUrl);
+                                absUrlObj.hash = '';
+                                const absoluteUrl = absUrlObj.toString();
+
+                                const ruleUrl = rule.url.endsWith('/') ? rule.url.slice(0, -1) : rule.url;
+                                const targetCheck = absoluteUrl.endsWith('/') ? absoluteUrl.slice(0, -1) : absoluteUrl;
+
+                                if (targetCheck === ruleUrl || targetCheck.startsWith(ruleUrl + '/')) {
+                                    links.push(absoluteUrl);
+                                }
+                            } catch (e) {
+                                // ignore invalid URLs
                             }
-                        } catch (e) {
-                            // ignore invalid URLs
                         }
-                    }
-                });
-
-                for (const link of links) {
-                    await this.visit(link, rule);
+                    });
                 }
+            }
+
+            for (const link of links) {
+                await this.visit(link, rule);
             }
 
         } catch (error: any) {
             this.log(`Error visiting ${cleanUrl}: ${error.message}`);
         }
+    }
+
+    private extractLinksFromXml(xmlContent: string): string[] {
+        const found: string[] = [];
+        try {
+            if (typeof xmlContent === 'string' && (xmlContent.trim().startsWith('<?xml') || xmlContent.includes('<rss') || xmlContent.includes('<urlset') || xmlContent.includes('<feed'))) {
+                const $ = cheerio.load(xmlContent, { xmlMode: true });
+
+                // Sitemap: <url><loc>...</loc></url>
+                $('loc').each((_, el) => {
+                    const loc = $(el).text().trim();
+                    if (loc) found.push(loc);
+                });
+
+                // RSS: <item><link>...</link></item>
+                $('item > link').each((_, el) => {
+                    const link = $(el).text().trim();
+                    if (link) found.push(link);
+                });
+
+                // Atom: <entry><link href="..."/></entry>
+                $('entry > link').each((_, el) => {
+                    const href = $(el).attr('href');
+                    if (href) found.push(href);
+                });
+            }
+        } catch (e) { /* ignore */ }
+        return found;
     }
 
     private shouldIgnore(url: string): boolean {
@@ -137,12 +223,12 @@ export class Crawler {
         return false;
     }
 
-    private async processPage(url: string, html: string) {
+    private async processPage(url: string, html: string, rule: Rule) {
         const $ = cheerio.load(html);
 
         // Extract metadata
-        let title = $('meta[property="og:title"]').attr('content') || $('title').text() || 'Untitled';
-        let description = $('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content') || 'No description available.';
+        const title = $('meta[property="og:title"]').attr('content') || $('title').text() || 'Untitled';
+        const description = $('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content') || 'No description available.';
 
         // Clean content
         // Similar to goquery logic: remove headers, toc, etc if possible.
@@ -182,21 +268,66 @@ metadata:
 `;
         const finalContent = frontmatter + markdown;
 
-        await this.saveFile(url, finalContent);
+        await this.saveFile(url, finalContent, rule);
     }
 
-    private async saveFile(urlStr: string, content: string) {
+    private getFilePath(urlStr: string, rule?: Rule): string {
         const urlObj = new URL(urlStr);
         const outputDir = path.join(this.rootPath, this.config.output);
         let finalPath = '';
 
-        if (this.config.flat) {
+        if (rule && rule.bundle) {
+            // Bundle Logic (e.g. for Pub packages)
+            // Root Rule URL -> Bundle Dir Name
+            const ruleUrl = rule.url.endsWith('/') ? rule.url.slice(0, -1) : rule.url;
+            const ruleObj = new URL(ruleUrl);
+
+            // Consistent Bundle Name (Flat-ish style) based on Rule URL
+            let bundleName = ruleObj.pathname;
+            bundleName = bundleName.replace(/^\//, '').split('/').join('_');
+            const cleanDomain = ruleObj.hostname.replace(/\./g, '_');
+            const bundleDir = `${cleanDomain}_${bundleName}`;
+
+            // Determine relative path within bundle
+            // Ensure target URL is treated relative to Rule URL
+            let targetPath = urlObj.pathname;
+            let rulePath = ruleObj.pathname;
+
+            // Normalize slashes
+            if (!targetPath.endsWith('/')) targetPath += '/';
+            if (!rulePath.endsWith('/')) rulePath += '/';
+
+            let relative = '';
+            if (targetPath.startsWith(rulePath)) {
+                relative = targetPath.substring(rulePath.length);
+            } else if (urlStr === ruleUrl) {
+                relative = ''; // Root
+            } else {
+                // Fallback if something weird happens, treat as root or just name
+                relative = urlObj.pathname.split('/').pop() || '';
+            }
+
+            // Cleanup relative path
+            relative = relative.replace(/\/$/, '').replace(/^\//, '');
+
+            if (!relative) {
+                // Main Skill File
+                const fileName = this.config.file_rename || 'SKILL.md';
+                finalPath = path.join(outputDir, bundleDir, fileName);
+            } else {
+                // Reference File
+                const refName = relative.replace(/\//g, '_') + '.md';
+                finalPath = path.join(outputDir, bundleDir, 'references', refName);
+            }
+
+        } else if (this.config.flat) {
             // Flat logic: domain_path_to_file/SKILL.md
             let segment = urlObj.pathname;
             segment = segment.replace(/\.html$/, '');
             segment = segment.replace(/\/index$/, '');
             segment = segment.replace(/\/$/, '');
             segment = segment.replace(/^\//, '');
+            segment = segment.replace(/%20/g, '_'); // simple sanity?
             segment = segment.split('/').join('_');
 
             const cleanDomain = urlObj.hostname.replace(/\./g, '_');
@@ -212,46 +343,42 @@ metadata:
                 filePath = path.join(filePath, 'index');
             }
             if (!path.extname(filePath)) {
-                filePath += '.md'; // Default to md if not doing specific rename per file?
-                // The Go code handles extensions a bit differently for hierarchical.
-                // Here we simplify:
+                filePath += '.md';
             }
-            // For hierarchical with rename, it usually means rename the leaf? 
-            // The Go CLI applies rename to the output file.
 
             if (this.config.file_rename) {
-                // This is tricky for hierarchical. Go code:
-                // mdPath = filepath.Join(filepath.Dir(fullPath), fileRename)
                 const dir = path.join(outputDir, urlObj.hostname, path.dirname(filePath));
                 finalPath = path.join(dir, this.config.file_rename);
             } else {
-                // Just append .md to html path?
-                // Keeping simple for now to match flat preference
                 finalPath = path.join(outputDir, urlObj.hostname, filePath);
-                if (!finalPath.endsWith('.md')) finalPath += '.md';
+                if (!finalPath.endsWith('.md')) { finalPath += '.md'; }
             }
         }
+        return finalPath;
+    }
 
+    private async saveFile(urlStr: string, content: string, rule?: Rule) {
+        const finalPath = this.getFilePath(urlStr, rule);
         const dir = path.dirname(finalPath);
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
+        if (!this.fs.existsSync(dir)) {
+            this.fs.mkdirSync(dir, { recursive: true });
         }
 
-        fs.writeFileSync(finalPath, content);
+        this.fs.writeFileSync(finalPath, content);
     }
 
     private sanitizeName(s: string): string {
         s = s.toLowerCase();
         s = s.replace(/[^a-z0-9-]+/g, '-');
         s = s.replace(/^-+|-+$/g, '');
-        if (s.length > 64) s = s.substring(0, 64).replace(/-+$/, '');
+        if (s.length > 64) { s = s.substring(0, 64).replace(/-+$/, ''); }
         return s || 'untitled';
     }
 
     private sanitizeDescription(s: string): string {
         s = s.trim();
-        if (!s) return 'No description available.';
-        if (s.length > 1024) return s.substring(0, 1024) + '...';
+        if (!s) { return 'No description available.'; }
+        if (s.length > 1024) { return s.substring(0, 1024) + '...'; }
         return s;
     }
 
